@@ -15,14 +15,17 @@ void setup() {
   myservo_volts.write(170);
   
   Serial.begin(9600);
-  Serial.println("Enter: watts amps volts (e.g. 90 45 135)");
+  Serial.println("Enter: volts amps (e.g. 5 2)");
 }
 
 void loop() {
   if (Serial.available()) {
-    int watts_pos = Serial.parseInt();
-    int amps_pos  = Serial.parseInt();
-    int volts_pos = Serial.parseInt();
+    int voltage = Serial.parseInt();
+    int amps  = Serial.parseInt();
+    int watts = voltage * amps;
+    int volts_pos = 170 - (voltage / 20.0) * 170;
+    int amps_pos = 170 - (amps / 10.0) * 170;
+    int watts_pos = 170 - (watts / 14.5) * 170;
 
     // Wait for full input to be received
     if (Serial.read() == '\n') {
