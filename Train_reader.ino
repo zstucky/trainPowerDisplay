@@ -5,11 +5,19 @@ Servo watts_servo;
 Servo amps_servo;
 Servo volts_servo;
 
+int volt_pot_pin = A4;
+int amp_pot_pin = A5;
+int volt_pot_value = 0;
+int amp_pot_value = 0;
+
+unsigned long lastInputCheck = 0;
+const unsigned long inputInterval = 15;
+
 // Constants for scaling and slew rate
 float max_pos   = 170;  // Max servo angle
-float amp_slew  = 2;    // Amps servo movement step
-float volt_slew = 2;    // Volts servo movement step
-float watt_slew = 2;    // Watts servo movement step
+float amp_slew  = 1;    // Amps servo movement step
+float volt_slew = 1;    // Volts servo movement step
+float watt_slew = 1;    // Watts servo movement step
 
 // Current positions of each servo
 float curr_pos_volts = 80;
@@ -49,24 +57,31 @@ void setup() {
 }
 
 void loop() {
-  // Continuously check for input from Serial Monitor
-  checkInput();
 
+  if (millis() - lastInputCheck >= inputInterval) {
+    lastInputCheck = millis();
+    checkInput();  // your existing function
+  }
+  
   // Only fluctuate servos that have stable input
-  if (fluctuate_volts || fluctuate_amps) {
+  if (fluctuate_volts || fluctuate_amps || fluctuate_watts) {
     fluctuateNeedles();
   }
 }
 
 // Reads user input from serial and updates servo targets
 void checkInput() {
-  if (Serial.available()) {
-    float voltage = Serial.parseFloat();  // First value: volts
-    float amps    = Serial.parseFloat();  // Second value: amps
-    float watts   = voltage * amps;       // Derived value
+  volt_pot_value = analogRead(A4);
+  amp_pot_value = analogRead(A5);
+  float voltage = (volt_pot_value / 1023.0) * 20.0;
+  float amps = (amp_pot_value / 1023.0) * 1.0;
+  float watts = voltage * amps;
+  Serial.print(voltage);
+  Serial.print(" ");
+  Serial.print(amps);
+  Serial.print("\n");
 
-    // Wait until a newline to confirm input completion
-    if (Serial.read() == '\n') {
+ 
       // Convert voltage, amps, watts into servo angles
       float volts_pos = max_pos - (voltage / 20.0) * max_pos;
       float amps_pos  = max_pos - (amps / 1.0)   * max_pos;
@@ -80,9 +95,11 @@ void checkInput() {
       // Compare to previous values to decide whether to fluctuate
       float volts_delta = abs(volts_pos - curr_pos_volts);
       float amps_delta  = abs(amps_pos  - curr_pos_amps);
+      float watts_delta  = abs(watts_pos  - curr_pos_watts);
 
-      fluctuate_volts = (volts_delta < 3.0);  // If change is small, fluctuate
-      fluctuate_amps  = (amps_delta  < 3.0);
+      fluctuate_volts = (volts_delta < 1.0);  // If change is small, fluctuate
+      fluctuate_amps  = (amps_delta  < 1.0);
+      fluctuate_watts  = (watts_delta  < 1.0);
 
       // Save as previous values for next loop
       prev_volts_pos = volts_pos;
@@ -91,9 +108,9 @@ void checkInput() {
 
       // Move the servos to new target positions
       updateServos(watts_pos, amps_pos, volts_pos);
-    }
+    
   }
-}
+
 
 // Moves servos toward their target positions in small steps
 void updateServos(float target_pos_watts, float target_pos_amps, float target_pos_volts) {
@@ -103,21 +120,21 @@ void updateServos(float target_pos_watts, float target_pos_amps, float target_po
   float step_v = (target_pos_volts > curr_pos_volts) ? volt_slew : -volt_slew;
 
   // Smoothly move watts servo
-  if (abs(curr_pos_watts - target_pos_watts) > 3) {
+  if (abs(curr_pos_watts - target_pos_watts) > 1) {
     curr_pos_watts += step_w;
     curr_pos_watts = constrain(curr_pos_watts, 0, max_pos);
     watts_servo.write(curr_pos_watts);
   }
 
   // Smoothly move amps servo
-  if (abs(curr_pos_amps - target_pos_amps) > 3) {
+  if (abs(curr_pos_amps - target_pos_amps) > 1) {
     curr_pos_amps += step_a;
     curr_pos_amps = constrain(curr_pos_amps, 0, max_pos);
     amps_servo.write(curr_pos_amps);
   }
 
   // Smoothly move volts servo (only if not near target)
-  if (abs(curr_pos_volts - target_pos_volts) > 3) {
+  if (abs(curr_pos_volts - target_pos_volts) > 1) {
     curr_pos_volts += step_v;
     curr_pos_volts = constrain(curr_pos_volts, 0, max_pos);
     volts_servo.write(curr_pos_volts);
@@ -145,7 +162,7 @@ void fluctuateNeedles() {
     if (fluctuate_amps) {
       amps_servo.write(constrain(curr_pos_amps + jitter, 0, max_pos));
     }
-    if (fluctuate_volts || fluctuate_amps) {
+    if (fluctuate_watts) {
       watts_servo.write(constrain(curr_pos_watts + jitter, 0, max_pos));
     }
   }
