@@ -1,141 +1,152 @@
 #include <Servo.h>
 
+// Servo objects for each gauge
 Servo watts_servo;
 Servo amps_servo;
 Servo volts_servo;
 
-// Direction control flag for fluctuate
-bool fluctuate = true;
+// Constants for scaling and slew rate
+float max_pos   = 170;  // Max servo angle
+float amp_slew  = 2;    // Amps servo movement step
+float volt_slew = 2;    // Volts servo movement step
+float watt_slew = 2;    // Watts servo movement step
 
-// Configuration constants and current positions
-float max_pos = 170;       // Maximum servo angle
-float amp_slew = 5;        // Step size for amps servo movement
-float volt_slew = 5;       // Step size for volts servo movement
-float watt_slew = 5;       // Step size for watts servo movement
+// Current positions of each servo
+float curr_pos_volts = 80;
+float curr_pos_amps  = 80;
+float curr_pos_watts = 80;
 
-// Current servo positions (updated over time)
-float curr_pos_volts;
-float curr_pos_amps;
-float curr_pos_watts;
+// Previous target positions (used to detect if input is stable)
+float prev_volts_pos = 0;
+float prev_amps_pos  = 0;
+float prev_watts_pos = 0;
+
+// Fluctuation flags for each servo (indicates if it should jitter)
+bool fluctuate_volts = false;
+bool fluctuate_amps  = false;
+bool fluctuate_watts = false;
 
 void setup() {
-  // Attach each servo to its corresponding pin
+  // Attach each servo to a pin
   watts_servo.attach(9);
   amps_servo.attach(10);
   volts_servo.attach(11);
-  
-  // Initial sweep motion to test servos
+
+  // Quick startup sweep to show all needles moving
   watts_servo.write(max_pos);
   amps_servo.write(0);
   volts_servo.write(max_pos);
   delay(1000);
-  watts_servo.write(80);
-  amps_servo.write(80);
-  volts_servo.write(80);
 
-  // Initialize current position tracking
-  curr_pos_volts = 80;
-  curr_pos_amps = 80;
-  curr_pos_watts = 80;
-  
-  // Initialize serial communication
+  // Move to neutral position
+  watts_servo.write(curr_pos_watts);
+  amps_servo.write(curr_pos_amps);
+  volts_servo.write(curr_pos_volts);
+
+  // Start serial monitor
   Serial.begin(115200);
-  Serial.println("Enter: volts amps (e.g. 5 2)");
+  Serial.println("Enter: volts amps (e.g. 5.0 2.0)");
 }
 
 void loop() {
-  // Check for new input from Serial
+  // Continuously check for input from Serial Monitor
   checkInput();
 
-  // If no movement is in progress, animate voltage servo slightly
-  if (fluctuate) {
-    fluctuateVoltage();
+  // Only fluctuate servos that have stable input
+  if (fluctuate_volts || fluctuate_amps) {
+    fluctuateNeedles();
   }
 }
 
+// Reads user input from serial and updates servo targets
 void checkInput() {
-  // If data is available on the Serial port
   if (Serial.available()) {
-    // Parse float values for voltage and amps
-    float voltage = Serial.parseFloat();
-    float amps    = Serial.parseFloat();
-    float watts   = voltage * amps;
+    float voltage = Serial.parseFloat();  // First value: volts
+    float amps    = Serial.parseFloat();  // Second value: amps
+    float watts   = voltage * amps;       // Derived value
 
-    // Convert input values into servo target positions
-    float volts_pos = max_pos - (voltage / 20.0) * max_pos;
-    float amps_pos  = max_pos - (amps / 1.0) * max_pos;
-    float watts_pos = max_pos - (watts / 14.5) * max_pos;
-
-    // Wait for newline character to confirm full input
+    // Wait until a newline to confirm input completion
     if (Serial.read() == '\n') {
-      // Clamp values within valid servo range
+      // Convert voltage, amps, watts into servo angles
+      float volts_pos = max_pos - (voltage / 20.0) * max_pos;
+      float amps_pos  = max_pos - (amps / 1.0)   * max_pos;
+      float watts_pos = max_pos - (watts / 14.5) * max_pos;
+
+      // Clamp angles to servo limits
       volts_pos = constrain(volts_pos, 0, max_pos);
-      amps_pos  = constrain(amps_pos, 0, max_pos);
+      amps_pos  = constrain(amps_pos,  0, max_pos);
       watts_pos = constrain(watts_pos, 0, max_pos);
 
-      // Pass target positions to servo update function
+      // Compare to previous values to decide whether to fluctuate
+      float volts_delta = abs(volts_pos - curr_pos_volts);
+      float amps_delta  = abs(amps_pos  - curr_pos_amps);
+
+      fluctuate_volts = (volts_delta < 3.0);  // If change is small, fluctuate
+      fluctuate_amps  = (amps_delta  < 3.0);
+
+      // Save as previous values for next loop
+      prev_volts_pos = volts_pos;
+      prev_amps_pos  = amps_pos;
+      prev_watts_pos = watts_pos;
+
+      // Move the servos to new target positions
       updateServos(watts_pos, amps_pos, volts_pos);
     }
   }
 }
 
-void fluctuateVoltage() {
-  static unsigned long last_move = 0;             // Timestamp of last servo move
-  const unsigned long fluctuate_delay = 125;      // Delay between fluctuations
-  static bool fluctuate_direction = true;         // Direction of movement
-  static float fluctuate_offset = 0;              // Current offset from center
-
-  // Causes Delay
-  if (millis() - last_move >= fluctuate_delay) {
-    last_move = millis();
-
-    // Increment or decrement offset depending on direction
-    if (fluctuate_direction) {
-      fluctuate_offset += 1;
-    } else {
-      fluctuate_offset -= 1;
-    }
-
-    // Change direction at offset bounds
-    if (fluctuate_offset >= 3) {
-      fluctuate_offset = 3;
-      fluctuate_direction = false;
-    } else if (fluctuate_offset <= -3) {
-      fluctuate_offset = -3;
-      fluctuate_direction = true;
-    }
-
-    // Apply fluctuated offset to voltage and watt servos
-    volts_servo.write(constrain(curr_pos_volts + fluctuate_offset, 0, max_pos));
-    watts_servo.write(constrain(curr_pos_watts + fluctuate_offset, 0, max_pos));
-  }
-}
-
-void updateServos(int target_pos_watts, int target_pos_amps, int target_pos_volts) {
-  // Determine movement direction for each servo
+// Moves servos toward their target positions in small steps
+void updateServos(float target_pos_watts, float target_pos_amps, float target_pos_volts) {
+  // Determine which direction to move each servo
   float step_w = (target_pos_watts > curr_pos_watts) ? watt_slew : -watt_slew;
-  float step_a = (target_pos_amps > curr_pos_amps) ? amp_slew : -amp_slew;
+  float step_a = (target_pos_amps  > curr_pos_amps)  ? amp_slew  : -amp_slew;
   float step_v = (target_pos_volts > curr_pos_volts) ? volt_slew : -volt_slew;
 
-  // Update watts servo if not yet at target
-  if (curr_pos_watts != target_pos_watts) {
+  // Smoothly move watts servo
+  if (abs(curr_pos_watts - target_pos_watts) > 3) {
     curr_pos_watts += step_w;
+    curr_pos_watts = constrain(curr_pos_watts, 0, max_pos);
     watts_servo.write(curr_pos_watts);
   }
 
-  // Update amps servo if not yet at target
-  if (curr_pos_amps != target_pos_amps) {
+  // Smoothly move amps servo
+  if (abs(curr_pos_amps - target_pos_amps) > 3) {
     curr_pos_amps += step_a;
+    curr_pos_amps = constrain(curr_pos_amps, 0, max_pos);
     amps_servo.write(curr_pos_amps);
   }
 
-  // Update volts servo if it's more than 3 units away from target
+  // Smoothly move volts servo (only if not near target)
   if (abs(curr_pos_volts - target_pos_volts) > 3) {
-    fluctuate = false;  // Turn off fluctuation while moving
     curr_pos_volts += step_v;
+    curr_pos_volts = constrain(curr_pos_volts, 0, max_pos);
     volts_servo.write(curr_pos_volts);
-  } 
-  else {
-    fluctuate = true;   // Resume fluctuation once target is reached
+  }
+}
+
+// Adds small jitter to each servo that has stable input
+void fluctuateNeedles() {
+  static unsigned long last_move = 0;     // Time of last movement
+  const unsigned long fluctuate_delay = 100; // Delay between jitter frames
+  static float phase = 0;                 // Controls sine wave
+
+  if (millis() - last_move >= fluctuate_delay) {
+    last_move = millis();
+
+    // Jitter pattern using sine wave
+    float jitter = sin(phase) * 1.5;  // ~±1.5 degree movement
+    phase += 0.3;
+    if (phase > TWO_PI) phase = 0;
+
+    // Apply fluctuation to each servo independently
+    if (fluctuate_volts) {
+      volts_servo.write(constrain(curr_pos_volts + jitter, 0, max_pos));
+    }
+    if (fluctuate_amps) {
+      amps_servo.write(constrain(curr_pos_amps + jitter, 0, max_pos));
+    }
+    if (fluctuate_volts || fluctuate_amps) {
+      watts_servo.write(constrain(curr_pos_watts + jitter, 0, max_pos));
+    }
   }
 }
