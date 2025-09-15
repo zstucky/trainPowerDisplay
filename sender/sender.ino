@@ -1,5 +1,10 @@
 #include <WiFi.h>
 #include <esp_now.h>
+#include <Wire.h>
+#include <Adafruit_INA219.h>
+
+
+Adafruit_INA219 ina219;
 
 // ---------- PUT YOUR RECEIVER MAC HERE ----------
 // Receiver's STA MAC:
@@ -16,7 +21,7 @@ typedef struct {
 // --- pins & ADC config ---
 const int VOLTAGE_PIN = 33;            // blue divider S -> ADC1
 const int CURRENT_PIN = 36;            // ACS712 OUT -> ADC1 (direct, 3.3V)
-const float ADC_REF_VOLT = 3.3;        // with ADC_11db
+const float ADC_REF_VOLT = 3.3f;        // with ADC_11db
 const int   ADC_MAX      = 4095;
 const int   SAMPLES      = 64;
 
@@ -38,8 +43,13 @@ float readAdcVolts(int pin, int samples = SAMPLES) {
 
 void setup() {
   Serial.begin(115200);
+  Wire.begin(21, 22);   // SDA=21, SCL=22 on ESP32
+  if (!ina219.begin()) {
+    Serial.println("Failed to find INA219 chip");
+    while (1) { delay(10); }
+  }
+  ina219.setCalibration_32V_2A();  // good default: up to 32V bus, 2A current
   analogReadResolution(12);
-  analogSetAttenuation(ADC_11db);  // ~0–3.3V
 
   WiFi.mode(WIFI_STA);
   if (esp_now_init() != ESP_OK) { Serial.println("ESP-NOW init failed"); while (1) {} }
@@ -58,21 +68,18 @@ void loop() {
   // Read battery voltage
   float v_adc  = readAdcVolts(VOLTAGE_PIN);
   float v_batt = v_adc * DIVIDER_RATIO;
+  float curr_mA   = ina219.getCurrent_mA();
+  curr_mA *= CURRENT_SIGN;
 
-  // Read current (ACS712 5A @3.3V)
-  float v_cur  = readAdcVolts(CURRENT_PIN);                 // 0..3.3V direct
-  float amps   = ((v_cur - ACS_ZERO_V) * 1000.0f) / ACS_MV_PER_A;
-  amps *= CURRENT_SIGN;
-
-  Packet p{ v_batt, amps, ++seq };
+  Packet p{ v_batt, curr_mA, ++seq };
   esp_now_send(peerMac, reinterpret_cast<const uint8_t*>(&p), sizeof(p));
 
+  int raw = analogRead(36);  
+  float test  = raw * 3.3f / 4095.0f;
+    
   Serial.print("Sent  V="); Serial.print(v_batt, 2);
-  Serial.print("  A=");     Serial.print(amps, 3);
+  Serial.printf("  Current="); Serial.print(curr_mA, 2);
   Serial.print("  seq=");   Serial.println(seq);
-  float v_cur2  = readAdcVolts(CURRENT_PIN);  // 0..3.3V at ESP32 pin
-  Serial.print("v_cur="); Serial.println(v_cur2, 3);
-
 
   delay(1000); // or 5000 if you prefer
 }
