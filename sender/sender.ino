@@ -35,10 +35,35 @@ int CURRENT_SIGN = +1;                               // flip to -1 if sign is ba
 
 uint32_t seq = 0;
 
+const int AVG_SIZE = 5;
+float voltageHistory[AVG_SIZE] = {0};
+float currentHistory[AVG_SIZE] = {0};
+int avgIndex = 0;
+int sampleCount = 0;
+
 float readAdcVolts(int pin, int samples = SAMPLES) {
   uint32_t acc = 0;
   for (int i = 0; i < samples; i++) { acc += analogRead(pin); delayMicroseconds(80); }
   return (acc / (float)samples) * ADC_REF_VOLT / ADC_MAX;
+}
+
+void updateRollingAverage(float newVoltage, float newCurrent, float &avgVoltage, float &avgCurrent) {
+  // store new readings into circular buffer
+  voltageHistory[avgIndex] = newVoltage;
+  currentHistory[avgIndex] = newCurrent;
+
+  avgIndex = (avgIndex + 1) % AVG_SIZE;
+  if (sampleCount < AVG_SIZE) sampleCount++;
+
+  // compute average
+  float vSum = 0, cSum = 0;
+  for (int i = 0; i < sampleCount; i++) {
+    vSum += voltageHistory[i];
+    cSum += currentHistory[i];
+  }
+
+  avgVoltage = vSum / sampleCount;
+  avgCurrent = cSum / sampleCount;
 }
 
 void setup() {
@@ -71,15 +96,21 @@ void loop() {
   float curr_mA   = ina219.getCurrent_mA();
   curr_mA *= CURRENT_SIGN;
 
+  // compute rolling average
+  float avgV = 0, avgC = 0;
+  updateRollingAverage(v_batt, curr_mA, avgV, avgC);
+
   Packet p{ v_batt, curr_mA, ++seq };
   esp_now_send(peerMac, reinterpret_cast<const uint8_t*>(&p), sizeof(p));
 
   int raw = analogRead(36);  
   float test  = raw * 3.3f / 4095.0f;
-    
+  
   Serial.print("Sent  V="); Serial.print(v_batt, 2);
-  Serial.printf("  Current="); Serial.print(curr_mA, 2);
-  Serial.print("  seq=");   Serial.println(seq);
+  Serial.print("  Current="); Serial.print(curr_mA, 2);
+  Serial.print("  AvgV="); Serial.print(avgV, 2);
+  Serial.print("  AvgC="); Serial.print(avgC, 2);
+  Serial.print("  seq="); Serial.println(seq);
 
-  delay(1000); // or 5000 if you prefer
+  delay(2000); // or 5000 if you prefer
 }
