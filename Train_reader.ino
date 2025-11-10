@@ -1,12 +1,12 @@
-#include <Servo.h>
+#include <ESP32Servo.h>
 
 Servo watts_servo;
 Servo amps_servo;
 Servo volts_servo;
 
-// Analog input pins for potentiometers simulating voltage and current
-int volt_pot_pin = A4;
-int amp_pot_pin = A5;
+// Analog input pins for potentiometers simulating voltage and current (ESP32 ADC1)
+int volt_pot_pin = 33;   // was A4
+int amp_pot_pin  = 32;   // was A5
 int volt_pot_value = 0;
 int amp_pot_value = 0;
 
@@ -31,10 +31,13 @@ bool fluctuate_amps  = false;
 bool fluctuate_watts = false;
 
 void setup() {
-  // Attach each servo object to its designated output pin
-  watts_servo.attach(9);
-  amps_servo.attach(10);
-  volts_servo.attach(11);
+  // Keep your 10-bit math (0..1023) on ESP32 so your scaling stays unchanged
+  analogReadResolution(10);
+
+  // Attach each servo object to ESP32 PWM-capable GPIOs
+  watts_servo.attach(25);  // was 9
+  amps_servo.attach(26);   // was 10
+  volts_servo.attach(27);  // was 11
 
   // Initial motion to show all needles moving full range
   watts_servo.write(max_pos);
@@ -66,8 +69,8 @@ void loop() {
 
 // Reads potentiometer inputs and calculates target servo positions
 void checkInput() {
-  volt_pot_value = analogRead(A4);
-  amp_pot_value  = analogRead(A5);
+  volt_pot_value = analogRead(volt_pot_pin);  // was analogRead(A4);
+  amp_pot_value  = analogRead(amp_pot_pin);   // was analogRead(A5);
 
   // Map to real-world units (volts and amps)
   float voltage = (volt_pot_value / 1023.0) * 20.0;  // Assume 0–20V range
